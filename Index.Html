@@ -1,0 +1,187 @@
+# Runfile
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rapforever – Universal Web Player</title>
+<style>
+  :root { --bg:#111; --fg:#fff; --muted:#aaa; --accent:#26d07c; }
+  * { box-sizing: border-box; }
+  html,body { height:100%; margin:0; }
+  body {
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: var(--bg); color: var(--fg); padding: 24px;
+  }
+  .card {
+    width: min(720px, 100%); background: #181818; border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4); padding: 20px; text-align: center;
+  }
+  .logo-wrap {
+    width: 100%; display:flex; justify-content:center; margin: 8px 0 16px;
+  }
+  .logo {
+    width: min(420px, 90vw); height: min(420px, 90vw);
+    border-radius: 20px; background:#222; object-fit: contain;
+    box-shadow: inset 0 0 0 1px #333;
+  }
+  .title { font-size: clamp(20px, 3.8vw, 28px); margin: 12px 0 4px; font-weight: 700; }
+  .subtitle { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+  .controls { display:flex; gap: 12px; justify-content:center; flex-wrap: wrap; }
+  button, a.button {
+    border: none; cursor: pointer; padding: 12px 18px; border-radius: 999px;
+    font-weight: 600; text-decoration: none; display:inline-flex; align-items:center; gap:10px;
+  }
+  .primary { background: var(--accent); color: #0b1f16; }
+  .secondary { background: #2a2a2a; color: #fff; }
+  .danger { background: #3a2326; color: #ffb3be; }
+  .status { margin-top: 14px; font-size: 14px; color: var(--muted); min-height: 1.4em; }
+  audio { width:100%; margin-top:16px; display:block; }
+  .hint { margin-top:10px; font-size:12px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo-wrap">
+    <img id="logo" class="logo" alt="Sender-Logo" src="https://assets.laut.fm/f9013ddafa6e8f2e8fb8c3d74ff564a0?t=_640x640" />
+  </div>
+  <div class="title" id="stationName">Radio Rapforever</div>
+  <p class="subtitle">Klicke auf „Play“, um die Wiedergabe zu starten (erforderlich auf iOS/Android).</p>
+
+  <div class="controls">
+    <button id="playBtn" class="primary" type="button">▶️ Play</button>
+    <button id="pauseBtn" class="secondary" type="button" disabled>⏸️ Pause</button>
+    <a id="externalBtn" class="secondary button" href="#" target="_blank" rel="noopener">🔗 Extern öffnen</a>
+    <button id="reloadBtn" class="danger" type="button" style="display:none;">🔄 Neu versuchen</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <audio id="player" preload="none" playsinline></audio>
+
+  <div class="hint">
+    Tipp: Falls dein Browser das direkte Abspielen blockiert, nutze „Extern öffnen“ oder setze eine Proxy-URL (siehe Code-Kommentar).
+  </div>
+</div>
+
+<script>
+/** ====== KONFIGURATION ====== */
+const CONFIG = {
+  STATION_NAME: "Radio Rapforever",
+  STREAM_URL: "https://stream.laut.fm/rapforever",              // Direktstream (MP3)
+  LOGO_URL: "https://assets.laut.fm/f9013ddafa6e8f2e8fb8c3d74ff564a0?t=_640x640",
+  PROXY_URL: "",  // Optional: z. B. "https://dein-proxy.example.com/stream" (Node/PHP-Proxy setzt CORS)
+  EXTERNAL_URL: "https://stream.laut.fm/rapforever"             // Link für externe Player
+};
+/** =========================== */
+
+const audio = document.getElementById('player');
+const statusEl = document.getElementById('status');
+const playBtn = document.getElementById('playBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const reloadBtn = document.getElementById('reloadBtn');
+const externalBtn = document.getElementById('externalBtn');
+const logoEl = document.getElementById('logo');
+const stationEl = document.getElementById('stationName');
+
+// Set basics
+stationEl.textContent = CONFIG.STATION_NAME;
+logoEl.src = CONFIG.LOGO_URL;
+externalBtn.href = CONFIG.EXTERNAL_URL;
+
+// Media Session (Lockscreen/CarPlay/Benachrichtigung)
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: CONFIG.STATION_NAME,
+    artist: "Live Radio",
+    album: "Stream",
+    artwork: [
+      { src: CONFIG.LOGO_URL, sizes: "512x512", type: "image/png" }
+    ]
+  });
+}
+
+let triedProxy = false;
+let isPlaying = false;
+
+// Wähle geeignete Quelle (direkt oder Proxy)
+function chooseSource() {
+  return (!triedProxy && CONFIG.STREAM_URL) ? CONFIG.STREAM_URL :
+         (CONFIG.PROXY_URL || CONFIG.STREAM_URL);
+}
+
+// Abspielen mit Fehlerbehandlung & Fallback
+async function startPlayback() {
+  statusEl.textContent = "Verbinde…";
+  audio.src = chooseSource();
+
+  try {
+    await audio.play();
+    isPlaying = true;
+    playBtn.disabled = true;
+    pauseBtn.disabled = false;
+    reloadBtn.style.display = "none";
+    statusEl.textContent = "Läuft.";
+  } catch (err) {
+    // Mögliche Ursachen: Autoplay ohne User-Geste, CORS, Format, Token, Netz
+    console.warn("Play-Fehler:", err);
+    if (!triedProxy && CONFIG.PROXY_URL) {
+      triedProxy = true;
+      statusEl.textContent = "Direktstream blockiert – versuche Proxy…";
+      return startPlayback();
+    }
+    isPlaying = false;
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+    reloadBtn.style.display = "inline-block";
+    statusEl.textContent = "Konnte nicht starten. Tippe „Neu versuchen“ oder „Extern öffnen“.";
+  }
+}
+
+playBtn.addEventListener('click', startPlayback);
+pauseBtn.addEventListener('click', () => {
+  audio.pause();
+  isPlaying = false;
+  playBtn.disabled = false;
+  pauseBtn.disabled = true;
+  statusEl.textContent = "Pausiert.";
+});
+reloadBtn.addEventListener('click', () => {
+  triedProxy = false;
+  startPlayback();
+});
+
+// Wenn der Tab/Screen zurückkehrt, ggf. fortsetzen
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isPlaying) {
+    audio.play().catch(()=>{ /* ignorieren */ });
+  }
+});
+
+// Fehler/Abbruch/Stalls überwachen
+audio.addEventListener('error', () => {
+  statusEl.textContent = "Wiedergabefehler. Prüfe Stream/Netz oder nutze „Extern öffnen“.";
+  reloadBtn.style.display = "inline-block";
+});
+audio.addEventListener('stalled', () => {
+  statusEl.textContent = "Pufferung…";
+});
+audio.addEventListener('waiting', () => {
+  statusEl.textContent = "Verbinde/Puffere…";
+});
+audio.addEventListener('playing', () => {
+  statusEl.textContent = "Läuft.";
+});
+
+// Optional: Lautstärke speichern
+const VOL_KEY = "radio_volume_v1";
+audio.volume = Number(localStorage.getItem(VOL_KEY) ?? 1);
+audio.addEventListener('volumechange', () => {
+  localStorage.setItem(VOL_KEY, String(audio.volume));
+});
+</script>
+</body>
+</html>
